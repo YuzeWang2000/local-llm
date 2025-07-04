@@ -1,0 +1,122 @@
+/* 资源文件: resources/styles/main.qss */
+
+/* ===== 应用整体样式 ===== */
+QWidget {
+    background-color: #2d2d30;
+    color: #dcdcdc;
+    font-family: sans-serif;
+    font-size: 12pt;
+}
+
+/* ===== 主窗口 ===== */
+QMainWindow {
+    background-color: #252526;
+}
+
+/* ===== 文本显示区域 ===== */
+QTextBrowser, QTextEdit {
+    background-color: #1e1e1e;
+    color: #dcdcdc;
+    border: 1px solid #3c3c3c;
+    border-radius: 4px;
+    padding: 10px;
+    selection-background-color: #3c3c3c;
+}
+
+QTextBrowser {
+    font-size: 13pt;
+    line-height: 130%;
+}
+
+QTextBrowser:focus {
+    border-color: #007acc;
+}
+
+/* ===== 按钮样式 ===== */
+QPushButton {
+    background-color: #0e639c;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-weight: bold;
+    min-height: 30px;
+}
+
+QPushButton:hover {
+    background-color: #1177bb;
+}
+
+QPushButton:pressed {
+    background-color: #094e7a;
+}
+
+QPushButton:disabled {
+    background-color: #3c3c3c;
+    color: #858585;
+}
+
+/* ===== 下拉选择框 ===== */
+QComboBox {
+    background-color: #333333;
+    border: 1px solid #3c3c3c;
+    border-radius: 4px;
+    padding: 5px;
+    selection-background-color: #007acc;
+}
+
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 25px;
+    border-left: 1px solid #3c3c3c;
+}
+
+QComboBox::down-arrow {
+    image: url(icons/downarrow3.png);
+    width: 10px;
+    height: 10px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #333333;
+    selection-background-color: #007acc;
+    border: 1px solid #3c3c3c;
+}
+
+/* ===== 标签样式 ===== */
+QLabel {
+    color: #bebebe;
+}
+
+/* ===== 分隔线 ===== */
+QFrame[frameShape="4"] /* HLine */ {
+    background-color: #3c3c3c;
+    max-height: 1px;
+}
+
+/* ===== 滚动条 ===== */
+QScrollBar:vertical {
+    border: none;
+    background: #1e1e1e;
+    width: 10px;
+    margin: 0px 0px 0px 0px;
+}
+
+QScrollBar::handle:vertical {
+    background: #454545;
+    min-height: 20px;
+    border-radius: 4px;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    background: none;
+    height: 0px;
+}
+
+/* ===== 状态栏 ===== */
+QStatusBar {
+    background-color: #007acc;
+    color: white;
+    padding-left: 8px;
+}

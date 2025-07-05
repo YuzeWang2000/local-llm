@@ -100,23 +100,24 @@ class ChatWindow(QMainWindow):
         main_layout.addLayout(input_layout, 1)
     
     def _load_models(self):
-        models = self.api.list_models()
-        for m in models:
-            print(f"加载模型: {m['name']}")  # 调试输出
-        self.model_combo.addItems([m["name"] for m in models])
-        # self.model_combo.setCurrentText("gemma3n:latest")
+        response_list = self.api.get_model_list()
+        for m in response_list.models:
+            if m.model == "nomic-embed-text:latest":
+                pass
+            else:
+                self.model_combo.addItem(m.model)
     
     def _speak_output(self):
         """朗读输出区域的内容"""
         try:
             # 获取输出区域的纯文本内容（去除HTML标签）
             plain_text = self.current_response
-            print(f"朗读内容: {plain_text}")  # 调试输出
+            # print(f"朗读内容: {plain_text}")  # 调试输出
             plain_text = re.sub(r'<[^>]+>', '', plain_text)  # 移除所有HTML标签
-            print(f"朗读内容: {plain_text}")  # 调试输出
+            # print(f"朗读内容: {plain_text}")  # 调试输出
 
             plain_text = re.sub(r'[^\w\s,.!?！？，。]', '', plain_text)
-            print(f"朗读内容: {plain_text}")  # 调试输出
+            # print(f"朗读内容: {plain_text}")  # 调试输出
 
             plain_text = re.sub(r'\s+', ' ', plain_text).strip()  # 合并多余空格
 

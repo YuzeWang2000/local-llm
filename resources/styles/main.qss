@@ -56,27 +56,6 @@ QPushButton:disabled {
     color: #858585;
 }
 
-/* ===== 下拉选择框 ===== */
-QComboBox {
-    background-color: #333333;
-    border: 1px solid #3c3c3c;
-    border-radius: 4px;
-    padding: 5px;
-    selection-background-color: #007acc;
-}
-
-QComboBox::drop-down {
-    subcontrol-origin: padding;
-    subcontrol-position: top right;
-    width: 25px;
-    border-left: 1px solid #3c3c3c;
-}
-
-QComboBox::down-arrow {
-    image: url(icons/downarrow3.png);
-    width: 10px;
-    height: 10px;
-}
 
 QComboBox QAbstractItemView {
     background-color: #333333;

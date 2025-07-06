@@ -4,9 +4,13 @@ from PyQt6.QtWidgets import (
     QHBoxLayout, QLabel, QComboBox, QMessageBox
 )
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QTextCursor
+from PyQt6.QtCore import pyqtSlot
 from threads.worker import GenerateWorker, ChatWorker
+from threads.streaming_worker import StreamingWorker
 from threads.voice_input import VoskVoiceInputThread
 from core.ollama_client import OllamaAPI
+from core.langchain_ollama_client import LangchainOllamaAPI
 import markdown
 import pyttsx3  # 添加语音合成库
 import re
@@ -21,7 +25,7 @@ class ChatWindow(QMainWindow):
         self.speaker.setProperty('rate', 150)  # 设置语速
         self.speaker.setProperty('volume', 0.9)  # 设置音量
         # 初始化API客户端
-        self.api = OllamaAPI()
+        self.api = LangchainOllamaAPI()
         
         # 创建UI
         self._create_ui()
@@ -76,15 +80,17 @@ class ChatWindow(QMainWindow):
         # 模式切换和显示
         mode_layout = QVBoxLayout()
         self.mode_label = QLabel("当前模式:")
-        self.is_chat_mode = True  # 默认聊天模式
-        self.mode_display = QLabel("聊天模式")
+        self.is_chat_mode = False  # 默认聊天模式
+        self.mode_display = QLabel("生成模式")
 
         self.send_btn = QPushButton("发送")
-        self.send_btn.clicked.connect(self._send_chat_message)
+        # self.send_btn.clicked.connect(self._send_chat_message)
+        self.send_btn.clicked.connect(self._send_generate_message_stream)
 
         # self.mode_display.setStyleSheet("font-weight: bold; color: #4ec9b0;")
         self.change_mode_btn = QPushButton("切换模式")
         self.change_mode_btn.clicked.connect(self._toggle_mode)
+        self.change_mode_btn.setEnabled(False)
 
         mode_layout.addWidget(self.mode_label)
         mode_layout.addWidget(self.mode_display)
@@ -171,7 +177,7 @@ class ChatWindow(QMainWindow):
         QMessageBox.warning(self, "语音输入错误", error_msg)
 
     def _on_model_changed(self, model_name):
-        self.api.model = model_name
+        self.api.change_model(model_name)
         self.output_area.append(f"<b>已切换到模型:</b> {model_name}")
     
     def _clear_context(self):
@@ -179,51 +185,168 @@ class ChatWindow(QMainWindow):
         self.output_area.clear()
         self.output_area.append("<b>对话历史已清除</b>")
     
-    def _send_generate_message(self):
+    @pyqtSlot()
+    def _send_generate_message_stream(self):
         prompt = self.input_box.toPlainText().strip()
         if not prompt:
             return
             
-        self.output_area.append(f"<b>You:</b> {prompt}")
+        # 禁用发送按钮防止重复发送
+        self.send_btn.setEnabled(False)
+        
+        # 显示用户消息
+        self._append_user_message(prompt)
+        
+        # 清空输入框
         self.input_box.clear()
         
+        # 重置当前响应
+        self.current_response = ""
+        
+        # 显示初始的"思考中..."消息
+        self._append_ai_message("思考中...")
+
         # 创建工作线程
-        self.worker = GenerateWorker(self.api, prompt)
-        self.worker.finished.connect(self._show_response)
+        self.worker = StreamingWorker(self.api, prompt)
+        self.worker.partial_response.connect(self._update_partial_response)
+        self.worker.finished.connect(self._on_stream_finished)
         self.worker.error.connect(self._show_error)
         self.worker.start()
         
         # 禁用按钮防止重复发送
         self.send_btn.setEnabled(False)
 
-    def _send_chat_message(self):
-        prompt = self.input_box.toPlainText().strip()
-        if not prompt:
-            return
-            
-        self.output_area.append(f"<b>You:</b> {prompt}")
-        self.input_box.clear()
+    @pyqtSlot(str)
+    def _update_partial_response(self, response):
+        """更新部分响应 - 替换最后一条AI消息"""
+        # 移除之前的"思考中..."消息
+        self._remove_last_ai_message()
         
-        # 创建工作线程
-        self.worker = ChatWorker(self.api, prompt)
-        self.worker.finished.connect(self._show_response)
-        self.worker.error.connect(self._show_error)
-        self.worker.start()
+        # 更新当前响应
+        self.current_response = response
+        # 显示新内容
+        self._append_ai_message(response)
+
+    @pyqtSlot()
+    def _on_stream_finished(self):
+        """流式处理完成"""
+        # 确保最后一条消息是最终结果（而不是"思考中..."）
+        self._remove_last_ai_message()
+        # print(f"最终响应内容: {self.current_response}")  # 调试输出
+        plain_text = re.sub(r'<[^>]+>', '', self.current_response)  # 移除所有HTML标签
+        # print(f"最终响应内容: {plain_text}")  # 调试输出
+        plain_text = re.sub(r'[^\w\s,.!?！？，。]', '', plain_text)
+        # print(f"最终响应内容: {plain_text}")  # 调试输出
+        plain_text = re.sub(r'\s+', ' ', plain_text).strip()  # 合并多余空格
+        self.current_response = plain_text  # 更新当前响应为纯文本
+        print(f"最终响应内容: {self.current_response}")  # 调试输出
+        self._append_ai_message(self.current_response)
         
-        # 禁用按钮防止重复发送
-        self.send_btn.setEnabled(False)
-
-    def _show_response(self, response):
-
-        # 处理Markdown转换
-        html_response = markdown.markdown(response)
-        self.current_response = html_response      
-        self.output_area.append(f"<b>AI:</b> {html_response}")
+        # 清理资源
+        self.worker = None
+        self.current_response = ""
         self.send_btn.setEnabled(True)
     
+    @pyqtSlot(str)
     def _show_error(self, error_msg):
-        self.output_area.append(f"<b style='color:red'>错误:</b> {error_msg}")
-        self.send_btn.setEnabled(True)
+        """显示错误信息"""
+        self._remove_last_ai_message()
+        self._append_ai_message(f"<span style='color: red;'>{error_msg}</span>")
+        self._on_stream_finished()
+
+    def _append_user_message(self, text):
+        """添加用户消息"""
+        self.output_area.append(f"""
+            <div style='
+                margin: 10px;
+                background-color: #e3f2fd;
+                border-radius: 10px;
+                padding: 10px;
+                margin-left: 60px;
+                text-align: right;
+            '>
+                <b>你:</b> {text}
+            </div>
+        """)
+        self._scroll_to_bottom()
+
+    def _append_ai_message(self, text):
+        """添加AI消息"""
+        html = f"""
+            <div style='margin-bottom: 15px;'>
+                <div style='
+                    margin: 10px;
+                    background-color: #ffffff;
+                    border-radius: 10px;
+                    padding: 10px;
+                    margin-right: 60px;
+                    text-align: left;
+                '>
+                    <b>AI:</b> {text}
+                </div>
+            </div>
+        """
+        self.output_area.append(html)
+        self._scroll_to_bottom()
+    
+    def _remove_last_ai_message(self):
+        cursor = self.output_area.textCursor()
+        # 移动到文档末尾
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        # 选择当前块（也就是最后一条消息所在的块）
+        cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
+        # 删除选中的块
+        cursor.removeSelectedText()
+    def _scroll_to_bottom(self):
+        """滚动到底部"""
+        scrollbar = self.output_area.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+    # def _send_generate_message(self):
+    #     prompt = self.input_box.toPlainText().strip()
+    #     if not prompt:
+    #         return
+            
+    #     self.output_area.append(f"<b>You:</b> {prompt}")
+    #     self.input_box.clear()
+        
+    #     # 创建工作线程
+    #     self.worker = GenerateWorker(self.api, prompt)
+    #     self.worker.finished.connect(self._show_response)
+    #     self.worker.error.connect(self._show_error)
+    #     self.worker.start()
+        
+    #     # 禁用按钮防止重复发送
+    #     self.send_btn.setEnabled(False)
+
+    # def _send_chat_message(self):
+    #     prompt = self.input_box.toPlainText().strip()
+    #     if not prompt:
+    #         return
+            
+    #     self.output_area.append(f"<b>You:</b> {prompt}")
+    #     self.input_box.clear()
+        
+    #     # 创建工作线程
+    #     self.worker = ChatWorker(self.api, prompt)
+    #     self.worker.finished.connect(self._show_response)
+    #     self.worker.error.connect(self._show_error)
+    #     self.worker.start()
+        
+    #     # 禁用按钮防止重复发送
+    #     self.send_btn.setEnabled(False)
+
+    # def _show_response(self, response):
+
+    #     # 处理Markdown转换
+    #     html_response = markdown.markdown(response)
+    #     self.current_response = html_response      
+    #     self.output_area.append(f"<b>AI:</b> {html_response}")
+    #     self.send_btn.setEnabled(True)
+    
+    # def _show_error(self, error_msg):
+    #     self.output_area.append(f"<b style='color:red'>错误:</b> {error_msg}")
+    #     self.send_btn.setEnabled(True)
 
     def _toggle_mode(self):
         """切换聊天/生成模式"""

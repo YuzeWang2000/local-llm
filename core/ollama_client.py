@@ -60,5 +60,8 @@ class OllamaAPI:
         self.chat_context = []
     
     def get_model_list(self):
-        
         return ollama.list()
+    
+    def change_model(self, model_name):
+        self.model = model_name
+        self.reset_context()

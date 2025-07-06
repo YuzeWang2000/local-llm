@@ -276,7 +276,7 @@ class LangchainOllamaAPI(OllamaAPI):
     def stream_rag_response(self, prompt):
 
         for stream_chunk in self.process_query(prompt): # process_query yields full accumulated answer
-            print(f"Stream chunk received: {stream_chunk}")  # Debugging output
+            # print(f"Stream chunk received: {stream_chunk}")  # Debugging output
             yield stream_chunk
     
     

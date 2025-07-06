@@ -9,9 +9,8 @@ from PyQt6.QtCore import pyqtSlot
 from threads.worker import GenerateWorker, ChatWorker
 from threads.streaming_worker import StreamingWorker
 from threads.voice_input import VoskVoiceInputThread
-from core.ollama_client import OllamaAPI
 from core.langchain_ollama_client import LangchainOllamaAPI
-import markdown
+import markdown  # 用于处理Markdown格式
 import pyttsx3  # 添加语音合成库
 import re
 class ChatWindow(QMainWindow):
@@ -80,17 +79,16 @@ class ChatWindow(QMainWindow):
         # 模式切换和显示
         mode_layout = QVBoxLayout()
         self.mode_label = QLabel("当前模式:")
-        self.is_chat_mode = False  # 默认聊天模式
+        self.chat_mode = 0
         self.mode_display = QLabel("生成模式")
 
         self.send_btn = QPushButton("发送")
-        # self.send_btn.clicked.connect(self._send_chat_message)
-        self.send_btn.clicked.connect(self._send_generate_message_stream)
+        self.send_btn.clicked.connect(self._send_generate_message)
 
         # self.mode_display.setStyleSheet("font-weight: bold; color: #4ec9b0;")
         self.change_mode_btn = QPushButton("切换模式")
         self.change_mode_btn.clicked.connect(self._toggle_mode)
-        self.change_mode_btn.setEnabled(False)
+        # self.change_mode_btn.setEnabled(False)
 
         mode_layout.addWidget(self.mode_label)
         mode_layout.addWidget(self.mode_display)
@@ -179,9 +177,12 @@ class ChatWindow(QMainWindow):
     def _on_model_changed(self, model_name):
         self.api.change_model(model_name)
         self.output_area.append(f"<b>已切换到模型:</b> {model_name}")
+        self.statusBar().showMessage(f"已切换到模型: {model_name}", 2000)
+        self._clear_context()
     
     def _clear_context(self):
         self.api.reset_context()
+        self.current_response = ""  # 清空当前响应
         self.output_area.clear()
         self.output_area.append("<b>对话历史已清除</b>")
     
@@ -210,7 +211,7 @@ class ChatWindow(QMainWindow):
         self.worker = StreamingWorker(self.api, prompt)
         self.worker.partial_response.connect(self._update_partial_response)
         self.worker.finished.connect(self._on_stream_finished)
-        self.worker.error.connect(self._show_error)
+        self.worker.error.connect(self._show_stream_error)
         self.worker.start()
         
         # 禁用按钮防止重复发送
@@ -248,7 +249,7 @@ class ChatWindow(QMainWindow):
         self.send_btn.setEnabled(True)
     
     @pyqtSlot(str)
-    def _show_error(self, error_msg):
+    def _show_stream_error(self, error_msg):
         """显示错误信息"""
         self._remove_last_ai_message()
         self._append_ai_message(f"<span style='color: red;'>{error_msg}</span>")
@@ -297,72 +298,79 @@ class ChatWindow(QMainWindow):
         cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
         # 删除选中的块
         cursor.removeSelectedText()
+
     def _scroll_to_bottom(self):
         """滚动到底部"""
         scrollbar = self.output_area.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
-    # def _send_generate_message(self):
-    #     prompt = self.input_box.toPlainText().strip()
-    #     if not prompt:
-    #         return
+    def _send_generate_message(self):
+        prompt = self.input_box.toPlainText().strip()
+        if not prompt:
+            return
             
-    #     self.output_area.append(f"<b>You:</b> {prompt}")
-    #     self.input_box.clear()
+        self.output_area.append(f"<b>You:</b> {prompt}")
+        self.input_box.clear()
         
-    #     # 创建工作线程
-    #     self.worker = GenerateWorker(self.api, prompt)
-    #     self.worker.finished.connect(self._show_response)
-    #     self.worker.error.connect(self._show_error)
-    #     self.worker.start()
+        # 创建工作线程
+        self.worker = GenerateWorker(self.api, prompt)
+        self.worker.finished.connect(self._show_response)
+        self.worker.error.connect(self._show_error)
+        self.worker.start()
         
-    #     # 禁用按钮防止重复发送
-    #     self.send_btn.setEnabled(False)
+        # 禁用按钮防止重复发送
+        self.send_btn.setEnabled(False)
 
-    # def _send_chat_message(self):
-    #     prompt = self.input_box.toPlainText().strip()
-    #     if not prompt:
-    #         return
+    def _send_chat_message(self):
+        prompt = self.input_box.toPlainText().strip()
+        if not prompt:
+            return
             
-    #     self.output_area.append(f"<b>You:</b> {prompt}")
-    #     self.input_box.clear()
+        self.output_area.append(f"<b>You:</b> {prompt}")
+        self.input_box.clear()
         
-    #     # 创建工作线程
-    #     self.worker = ChatWorker(self.api, prompt)
-    #     self.worker.finished.connect(self._show_response)
-    #     self.worker.error.connect(self._show_error)
-    #     self.worker.start()
+        # 创建工作线程
+        self.worker = ChatWorker(self.api, prompt)
+        self.worker.finished.connect(self._show_response)
+        self.worker.error.connect(self._show_error)
+        self.worker.start()
         
-    #     # 禁用按钮防止重复发送
-    #     self.send_btn.setEnabled(False)
+        # 禁用按钮防止重复发送
+        self.send_btn.setEnabled(False)
 
-    # def _show_response(self, response):
+    def _show_response(self, response):
 
-    #     # 处理Markdown转换
-    #     html_response = markdown.markdown(response)
-    #     self.current_response = html_response      
-    #     self.output_area.append(f"<b>AI:</b> {html_response}")
-    #     self.send_btn.setEnabled(True)
+        # 处理Markdown转换
+        html_response = markdown.markdown(response)
+        self.current_response = html_response      
+        self.output_area.append(f"<b>AI:</b> {html_response}")
+        self.send_btn.setEnabled(True)
     
-    # def _show_error(self, error_msg):
-    #     self.output_area.append(f"<b style='color:red'>错误:</b> {error_msg}")
-    #     self.send_btn.setEnabled(True)
+    def _show_error(self, error_msg):
+        self.output_area.append(f"<b style='color:red'>错误:</b> {error_msg}")
+        self.send_btn.setEnabled(True)
 
     def _toggle_mode(self):
         """切换聊天/生成模式"""
-        self.is_chat_mode = not self.is_chat_mode
-        
-        # 更新模式显示
-        if self.is_chat_mode:
+        if (self.chat_mode==0 ):
             self.send_btn.clicked.disconnect(self._send_generate_message)
+            self.chat_mode = 1
+            mode_text = "聊天模式"
             self.send_btn.clicked.connect(self._send_chat_message)
-        else:
+        elif (self.chat_mode==1):
             self.send_btn.clicked.disconnect(self._send_chat_message)
+            self.chat_mode = 2
+            mode_text = "检索模式"
+            self.send_btn.clicked.connect(self._send_generate_message_stream)
+        elif (self.chat_mode==2):
+            self.send_btn.clicked.disconnect(self._send_generate_message_stream)
+            self.chat_mode = 0
+            mode_text = "生成模式"
             self.send_btn.clicked.connect(self._send_generate_message)
+        else:
+            raise ValueError("未知模式")
 
-        mode_text = "聊天模式" if self.is_chat_mode else "生成模式"
-        self.mode_display.setText(mode_text)
-    
-            
+        self.mode_display.setText(mode_text)  
+        self._clear_context()
         # 可选：添加状态栏提示
         self.statusBar().showMessage(f"已切换到{mode_text}", 2000)

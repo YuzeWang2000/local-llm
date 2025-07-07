@@ -6,11 +6,17 @@ import langchain
 import langsmith
 
 from langchain_community.embeddings import OllamaEmbeddings
-from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
+from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader,UnstructuredWordDocumentLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_ollama import OllamaEmbeddings, ChatOllama, OllamaLLM
+
+from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate, MessagesPlaceholder,PromptTemplate 
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from typing import List, Union, Annotated
+from pydantic import Field
+
 import os
 from core.ollama_client import OllamaAPI
 class LangchainOllamaAPI(OllamaAPI):
@@ -31,7 +37,11 @@ class LangchainOllamaAPI(OllamaAPI):
         self.LANGSMITH_API_KEY = ""  # LangSmith API Key
         self.search_k = 10  # 检索时返回的文档数量
         self.rebuild_index_and_chain()  # 初始化时重建索引和RAG链
-        
+    
+    def get_documentes_dir(self):
+        """获取文档目录"""
+        return self.documentes_dir
+    
     # 1. 定义文档加载函数，支持PDF, TXT, DOCX等格式
     def load_documents(self):
         documents = []
@@ -41,12 +51,18 @@ class LangchainOllamaAPI(OllamaAPI):
 
             if file.endswith('.pdf'):
                 loader = PyPDFLoader(file_path)
+                print(f"加载 PDF 文档: {file_path}")
                 documents.extend(loader.load())
             elif file_path.endswith('.txt'):
                 loader = TextLoader(file_path)
                 documents.extend(loader.load())
-            elif file.endswith('.docx') or file.endswith('.doc'):
+            elif file.endswith('.docx'):
+                print(f"加载 Docx 文档: {file_path}")
                 loader = Docx2txtLoader(file_path)
+                documents.extend(loader.load())
+            elif file.endswith('.doc'):
+                print(f"加载 Doc 文档: {file_path}")
+                loader = UnstructuredWordDocumentLoader(file_path)
                 documents.extend(loader.load())
 
         return documents
@@ -109,13 +125,73 @@ class LangchainOllamaAPI(OllamaAPI):
                 # No chunks provided and DB doesn't exist/is empty - cannot create.
                 print(f"Vector database directory {self.persist_directory} not found or empty, and no chunks provided to create a new one.")
                 return None # Indicate DB doesn't exist and cannot be created yet
+            
+    def create_offline_retrieval_qa_prompt(self):
+        """创建离线版本的 retrieval-qa-chat 提示模板"""
+        
+        # 定义系统消息模板
+        system_template = PromptTemplate(
+            input_variables=['context'],
+            template='Answer any use questions based solely on the context below:\n\n<context>\n{context}\n</context>'
+        )
+    
+        # 创建完整的提示模板
+        prompt = ChatPromptTemplate.from_messages([
+            SystemMessagePromptTemplate(prompt=system_template),
+            MessagesPlaceholder(variable_name="chat_history", optional=True),
+            HumanMessagePromptTemplate.from_template("{input}")
+        ])
+    
+        # 手动设置元数据以匹配原始模板
+        prompt.input_variables = ['context', 'input']
+        prompt.optional_variables = ['chat_history']
+        
+        # 定义输入类型
+        prompt.input_types = {
+            'chat_history': List[
+                Annotated[
+                    Union[
+                        Annotated[AIMessage, Field(tag='ai')],
+                        Annotated[HumanMessage, Field(tag='human')],
+                        Annotated[SystemMessage, Field(tag='system')],
+                        # 其他消息类型可以按需添加
+                    ],
+                    Field(required=True)
+                ]
+            ]
+        }
+    
+        # 设置部分变量
+        prompt.partial_variables = {'chat_history': []}
+        
+        
+        return prompt
+
+    def get_prompt_template(self):
+        """获取提示模板，优先使用在线版本，失败时使用离线版本"""
+        # 尝试从 LangSmith 获取在线模板
+        try:
+            if hasattr(self, 'LANGSMITH_API_KEY') and self.LANGSMITH_API_KEY:
+                client = langsmith.Client(api_key=self.LANGSMITH_API_KEY)
+                prompt = client.pull_prompt(
+                    "langchain-ai/retrieval-qa-chat", 
+                    include_model=True
+                )
+                print("成功从 LangSmith 获取提示模板")
+                return prompt
+        except Exception as e:
+            print(f"从 LangSmith 获取提示模板失败: {str(e)}")
+            # 记录错误但不中断流程
+        
+        # 使用离线模板作为备选
+        print("使用离线提示模板")
+        return self.create_offline_retrieval_qa_prompt()
     
     # 6. 创建RAG检索链（使用新方法）
     def create_rag_chain(self,vector_db):
-        client = langsmith.Client(api_key=self.LANGSMITH_API_KEY)
-        prompt = client.pull_prompt("langchain-ai/retrieval-qa-chat", include_model=True)
+        ChatPromptTemplate = self.get_prompt_template()
         # 创建文档组合链
-        combine_docs_chain = create_stuff_documents_chain(self.llm, prompt)
+        combine_docs_chain = create_stuff_documents_chain(self.llm, ChatPromptTemplate)
         # 创建检索链
         # Using default similarity search. If this fails, and embedding model is good,
         # then advanced retrieval or query transformation might be needed.

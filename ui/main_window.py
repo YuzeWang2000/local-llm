@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, 
     QTextBrowser, QTextEdit, QPushButton,
-    QHBoxLayout, QLabel, QComboBox, QMessageBox
+    QHBoxLayout, QLabel, QComboBox, QMessageBox, QFileDialog, QInputDialog, QLineEdit
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QTextCursor
@@ -13,6 +13,8 @@ from core.langchain_ollama_client import LangchainOllamaAPI
 import markdown  # 用于处理Markdown格式
 import pyttsx3  # 添加语音合成库
 import re
+import os
+import shutil
 class ChatWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -48,9 +50,15 @@ class ChatWindow(QMainWindow):
         self.clear_btn = QPushButton("清除历史")
         self.clear_btn.clicked.connect(self._clear_context)
         
+        # 添加文件上传按钮
+        self.upload_btn = QPushButton("上传文件")
+        self.upload_btn.clicked.connect(self._upload_file)
+        self.upload_btn.setToolTip("上传文档到知识库")
+
         control_layout.addWidget(QLabel("选择模型:"))
         control_layout.addWidget(self.model_combo, 3)
         control_layout.addWidget(self.clear_btn)
+        control_layout.addWidget(self.upload_btn)
         
         # 在控制栏添加语音按钮
         self.voice_btn = QPushButton("朗读")
@@ -374,3 +382,91 @@ class ChatWindow(QMainWindow):
         self._clear_context()
         # 可选：添加状态栏提示
         self.statusBar().showMessage(f"已切换到{mode_text}", 2000)
+
+    def _upload_file(self):
+        """打开文件对话框选择文件并上传到知识库（处理文件已存在情况）"""
+        # 支持的文件类型
+        file_types = "文档文件 (*.pdf *.docx *.doc *.txt)"
+        
+        # 打开文件选择对话框
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, 
+            "选择要上传的文档", 
+            "", 
+            file_types
+        )
+        
+        if not file_path:
+            return  # 用户取消了选择
+        
+        # 获取文件名
+        file_name = os.path.basename(file_path)
+        
+        # 目标目录
+        target_dir = self.api.get_documentes_dir()
+        
+        # 确保目标目录存在
+        if not os.path.exists(target_dir):
+            os.makedirs(target_dir)
+        
+        # 目标路径
+        target_path = os.path.join(target_dir, file_name)
+        
+        try:
+            # 检查文件是否已存在
+            if os.path.exists(target_path):
+                # 询问用户如何处理
+                reply = QMessageBox.question(
+                    self,
+                    "文件已存在",
+                    f"文件 '{file_name}' 已存在，是否覆盖？",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Cancel
+                )
+                
+                
+                if reply == QMessageBox.StandardButton.Cancel:
+                    self.output_area.append(
+                        f"<div style='color: orange;'>已取消上传: 文件 '{file_name}' 已存在</div>"
+                    )
+                    return
+                elif reply == QMessageBox.StandardButton.No:
+                    # 获取新文件名
+                    new_name, ok = QInputDialog.getText(
+                        self,
+                        "重命名文件",
+                        "输入新文件名:",
+                        QLineEdit.EchoMode.Normal,
+                        file_name
+                    )
+                    
+                    if not ok or not new_name:
+                        self.output_area.append(
+                            f"<div style='color: orange;'>已取消上传: 未提供新文件名</div>"
+                        )
+                        return
+                    
+                    # 更新目标路径
+                    target_path = os.path.join(target_dir, new_name)
+                    file_name = new_name  # 更新用于显示的文件名
+            
+            # 复制文件到目标目录
+            shutil.copyfile(file_path, target_path)
+            
+            # 更新索引
+            self.api.rebuild_index_and_chain()
+            
+            # 显示成功消息
+            self.output_area.append(
+                f"<div style='color: green;'>已成功上传文档: {file_name}</div>"
+            )
+            
+            # 滚动到底部
+            self.output_area.verticalScrollBar().setValue(
+                self.output_area.verticalScrollBar().maximum()
+            )
+        except Exception as e:
+            # 显示错误消息
+            self.output_area.append(
+                f"<div style='color: red;'>上传失败: {str(e)}</div>"
+            )

@@ -248,10 +248,10 @@ class LangchainOllamaAPI(OllamaAPI):
             # Try to load existing DB even if no new documents are found
             print("尝试加载现有向量数据库...")
             # Pass None for chunks as we are just trying to load
-            vector_db = self.get_vector_db(None)
-            if vector_db:
+            self.vector_db = self.get_vector_db(None)
+            if self.vector_db:
                 print("没有新文档加载，将使用现有的向量数据库。重新创建 RAG 链...")
-                self.rag_chain = self.create_rag_chain(vector_db)
+                self.rag_chain = self.create_rag_chain(self.vector_db)
                 return "没有找到新文档，已使用现有数据重新加载 RAG 链。"
             else:
                 # No documents AND no existing DB
@@ -264,10 +264,10 @@ class LangchainOllamaAPI(OllamaAPI):
             print("分割后未生成文本块。")
             # Try loading existing DB if splitting yielded nothing
             print("尝试加载现有向量数据库...")
-            vector_db = self.get_vector_db(None)
-            if vector_db:
+            self.vector_db = self.get_vector_db(None)
+            if self.vector_db:
                 print("警告：新加载的文档分割后未产生任何文本块。使用现有数据库。")
-                self.rag_chain = self.create_rag_chain(vector_db) # Ensure chain is recreated
+                self.rag_chain = self.create_rag_chain(self.vector_db) # Ensure chain is recreated
                 return "警告：文档分割后未产生任何文本块。RAG 链已使用现有数据重新加载。"
             else:
                 # No chunks AND no existing DB
@@ -280,38 +280,38 @@ class LangchainOllamaAPI(OllamaAPI):
 
         if vector_db_loaded:
             print(f"向现有向量数据库添加 {len(chunks)} 个块...")
-            vector_db = vector_db_loaded # Use the loaded DB
+            self.vector_db = vector_db_loaded # Use the loaded DB
             try:
                 # Consider adding only new chunks if implementing duplicate detection later
-                vector_db.add_documents(chunks)
+                self.vector_db.add_documents(chunks)
                 print("块添加成功。")
                 # Persisting might be needed depending on Chroma version/setup, often automatic.
                 # vector_db.persist() # Uncomment if persistence issues occur
             except Exception as e:
                 print(f"添加文档到 Chroma 时出错: {e}")
                 # If adding fails, proceed with the DB as it was before adding
-                self.rag_chain = self.create_rag_chain(vector_db)
+                self.rag_chain = self.create_rag_chain(self.vector_db)
                 return f"错误：向向量数据库添加文档时出错: {e}。RAG链可能使用旧数据。"
         else:
             # Database didn't exist or couldn't be loaded, create a new one with the current chunks
             print(f"创建新的向量数据库并添加 {len(chunks)} 个块...")
             try:
                 # Call get_vector_db again, this time *with* chunks to trigger creation
-                vector_db = self.get_vector_db(chunks)
-                if vector_db is None: # Check if creation failed within get_vector_db
+                self.vector_db = self.get_vector_db(chunks)
+                if self.vector_db is None: # Check if creation failed within get_vector_db
                     raise RuntimeError("get_vector_db failed to create a new database.")
                 print("新的向量数据库已创建并持久化。")
             except Exception as e:
                 print(f"创建新的向量数据库时出错: {e}")
                 return f"错误：创建向量数据库失败: {e}"
 
-        if vector_db is None:
+        if self.vector_db is None:
             # This should ideally not be reached if error handling above is correct
             return "错误：未能加载或创建向量数据库。"
 
         # Step 4: Create RAG chain
         print("创建 RAG 链...")
-        self.rag_chain = self.create_rag_chain(vector_db)
+        self.rag_chain = self.create_rag_chain(self.vector_db)
         print("索引和 RAG 链已成功更新。")
         return "文档处理完成，索引和 RAG 链已更新。"
 

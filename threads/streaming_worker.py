@@ -17,9 +17,9 @@ class StreamingWorker(QThread):
             response_stream = self.api.stream_rag_response(self.prompt)
             
             # 处理流式响应
-            accumulated_response = ""
+
             for chunk in response_stream:
-                print(f"接收到数据块: {chunk}")
+                # print(f"接收到数据块: {chunk}")
                 if self.cancel_requested:
                     self.partial_response.emit("已取消")
                     return

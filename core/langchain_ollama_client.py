@@ -41,26 +41,55 @@ class LangchainOllamaAPI(OllamaAPI):
     def get_documentes_dir(self):
         """获取文档目录"""
         return self.documentes_dir
+    # 新增方法：检测需要更新的文件
+    def get_changed_files(self):
+        processed_info_path = os.path.join(self.persist_directory, "processed_files.json")
+    
+        # 确保向量库目录存在
+        os.makedirs(self.persist_directory, exist_ok=True)
+        # 读取已处理文件记录（格式：{文件名: 最后修改时间})
+        if os.path.exists(processed_info_path):
+            with open(processed_info_path, 'r') as f:
+                processed_files = json.load(f)
+        else:
+            processed_files = {}
+        
+        # 扫描文档目录，检查变更
+        changed_files = []
+        for file in os.listdir(self.documentes_dir):
+            file_path = os.path.join(self.documentes_dir, file)
+            mtime = os.path.getmtime(file_path)
+            
+            # 如果是新文件或修改过的文件
+            if file not in processed_files or processed_files[file] != mtime:
+                changed_files.append(file_path)
+                processed_files[file] = mtime  # 更新记录
+        
+        # 保存处理记录
+        with open(processed_info_path, 'w') as f:
+            json.dump(processed_files, f)
+            
+        return changed_files
     
     # 1. 定义文档加载函数，支持PDF, TXT, DOCX等格式
     def load_documents(self):
+        changed_files = self.get_changed_files()
         documents = []
 
-        for file in os.listdir(self.documentes_dir):
-            file_path = os.path.join(self.documentes_dir, file)
+        for file_path in changed_files:
 
-            if file.endswith('.pdf'):
+            if file_path.endswith('.pdf'):
                 loader = PyPDFLoader(file_path)
                 print(f"加载 PDF 文档: {file_path}")
                 documents.extend(loader.load())
             elif file_path.endswith('.txt'):
                 loader = TextLoader(file_path)
                 documents.extend(loader.load())
-            elif file.endswith('.docx'):
+            elif file_path.endswith('.docx'):
                 print(f"加载 Docx 文档: {file_path}")
                 loader = Docx2txtLoader(file_path)
                 documents.extend(loader.load())
-            elif file.endswith('.doc'):
+            elif file_path.endswith('.doc'):
                 print(f"加载 Doc 文档: {file_path}")
                 loader = UnstructuredWordDocumentLoader(file_path)
                 documents.extend(loader.load())

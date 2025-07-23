@@ -18,13 +18,22 @@ from typing import List, Union, Annotated
 from pydantic import Field
 
 import os
-from core.ollama_client import OllamaAPI
-class LangchainOllamaAPI(OllamaAPI):
-    BASE_URL = "http://localhost:11434"
+from langchain_deepseek import ChatDeepSeek
+online_models = ["deepseek-chat","deepseek-reasoner"]
+if not os.getenv("DEEPSEEK_API_KEY"):
+    os.environ["DEEPSEEK_API_KEY"] = "sk-236bce0f7dd24558aeff022508884602"
+# class LangchainOllamaAPI(OllamaAPI):
+class LangchainAPI:
+    # BASE_URL = "http://localhost:11434"
     
     def __init__(self, model="gemma3n"):
         self.model = model
-        self.llm = OllamaLLM(model=self.model)
+        if self.model in online_models:
+            self.generate_llm = ChatDeepSeek(model=self.model)
+            self.chat_llm = self.generate_llm
+        else:
+            self.generate_llm = OllamaLLM(model=self.model)
+            self.chat_llm = ChatOllama(model=self.model)
         self.generate_context = []  # 生成模式上下文
         self.chat_context = []  # 对话上下文
         self.vector_db = None  # 向量存储
@@ -220,7 +229,7 @@ class LangchainOllamaAPI(OllamaAPI):
     def create_rag_chain(self,vector_db):
         ChatPromptTemplate = self.get_prompt_template()
         # 创建文档组合链
-        combine_docs_chain = create_stuff_documents_chain(self.llm, ChatPromptTemplate)
+        combine_docs_chain = create_stuff_documents_chain(self.generate_llm, ChatPromptTemplate)
         # 创建检索链
         # Using default similarity search. If this fails, and embedding model is good,
         # then advanced retrieval or query transformation might be needed.
@@ -232,7 +241,7 @@ class LangchainOllamaAPI(OllamaAPI):
     def rebuild_index_and_chain(self):
         """Loads documents, creates/updates vector DB by adding new content, and rebuilds the RAG chain."""
 
-        if self.embeddings is None or self.llm is None:
+        if self.embeddings is None or self.generate_llm is None:
             return "错误：Embeddings 或 LLM 未初始化。"
 
         # Ensure documents directory exists
@@ -316,7 +325,7 @@ class LangchainOllamaAPI(OllamaAPI):
         return "文档处理完成，索引和 RAG 链已更新。"
 
     # 7. Function to process query using the RAG chain (Modified for Streaming)
-    def process_query(self, query):
+    def process_rag_query(self, query):
         """Processes a user query using the RAG chain and streams the answer."""
         if self.rag_chain is None:
             yield "错误：RAG 链未初始化。"
@@ -380,12 +389,91 @@ class LangchainOllamaAPI(OllamaAPI):
 
     def stream_rag_response(self, prompt):
 
-        for stream_chunk in self.process_query(prompt): # process_query yields full accumulated answer
+        for stream_chunk in self.process_rag_query(prompt): # process_query yields full accumulated answer
             # print(f"Stream chunk received: {stream_chunk}")  # Debugging output
             yield stream_chunk
     
+    def stream_chat_response(self, prompt):
+        self.chat_context.append({"role": "user", "content": prompt})
+        full_answer = ""
+        print("开始流式生成回答...")
+        for stream_chunk in self.chat_llm.stream(self.chat_context):
+            print(f"Stream chunk received: {stream_chunk}")
+            # 兼容 AIMessageChunk、str 及其他类型
+            if hasattr(stream_chunk, "content"):
+                answer_part = stream_chunk.content
+            elif isinstance(stream_chunk, str):
+                answer_part = stream_chunk
+            else:
+                answer_part = str(stream_chunk)
+            # print(f"Stream chunk received: {answer_part}")
+            full_answer += answer_part
+            yield full_answer
+        print(f"流式处理完成。最终回答: {full_answer}")
+        self.chat_context.append({"role": 'assistant', "content": full_answer})
     
+    def build_context_prompt(self, prompt):
+        context = "\n".join(self.generate_context)
+        template = (
+            "以下是用户和助手的对话历史，请根据上下文继续对话。\n\n"
+            "{context}\n"
+            "用户: {input}\n"
+            "助手:"
+        )
+        return template.format(context=context, input=prompt)
+
+    def stream_generate_response(self, prompt):
+        full_answer = ""
+        print("开始流式生成回答...")
+        full_prompt = self.build_context_prompt(prompt)
+        for stream_chunk in self.generate_llm.stream(full_prompt):
+            # 兼容 AIMessageChunk、str 及其他类型
+            if hasattr(stream_chunk, "content"):
+                answer_part = stream_chunk.content
+            elif isinstance(stream_chunk, str):
+                answer_part = stream_chunk
+            else:
+                answer_part = str(stream_chunk)
+            full_answer += answer_part
+            yield full_answer
+        print(f"流式处理完成。最终回答: {full_answer}")
+        self.generate_context.append(f"用户: {prompt}\n助手: {full_answer}")
+
     def change_model(self, model_name):
         self.model = model_name
-        self.llm = OllamaLLM(model=self.model)
+        if model_name in online_models:
+            self.generate_llm = ChatDeepSeek(model=self.model)
+            self.chat_llm = self.generate_llm
+        else:
+            self.generate_llm = OllamaLLM(model=self.model)
+            self.chat_llm = ChatOllama(model=self.model)
         self.reset_context()
+
+    def reset_context(self):
+        self.generate_context = []
+        self.chat_context = []
+    
+    def is_embedding_model(self,model_obj):
+        # 1. 名称包含 embed
+        if "embed" in model_obj.model.lower():
+            return True
+        # 2. family 或 families 包含 embed
+        if hasattr(model_obj.details, "family") and "embed" in model_obj.details.family.lower():
+            return True
+        if hasattr(model_obj.details, "families"):
+            if any("embed" in fam.lower() for fam in model_obj.details.families):
+                return True
+        # 3. 其他可扩展规则
+        return False
+
+    def get_model_list(self):
+        response_list = ollama.list()
+        model_list = []
+        for m in response_list.models:
+            if self.is_embedding_model(m):
+                pass
+            else:
+                model_list.append(m.model)
+        for m in online_models:
+            model_list.append(m)
+        return model_list

@@ -5,16 +5,22 @@ class StreamingWorker(QThread):
     finished = pyqtSignal()             # 处理完成信号
     error = pyqtSignal(str)              # 错误信号
     
-    def __init__(self, api, prompt, parent=None):
+    def __init__(self, api, prompt, mode, parent=None):
         super().__init__(parent)
         self.api = api
         self.prompt = prompt
+        self.mode = mode
         self.cancel_requested = False
     
     def run(self):
         try:
             # 使用流式API生成响应
-            response_stream = self.api.stream_rag_response(self.prompt)
+            if self.mode == "retrieval":
+                response_stream = self.api.stream_rag_response(self.prompt)
+            elif self.mode == "chat":
+                response_stream = self.api.stream_chat_response(self.prompt)
+            elif self.mode == "generate":
+                response_stream = self.api.stream_generate_response(self.prompt)
             
             # 处理流式响应
 

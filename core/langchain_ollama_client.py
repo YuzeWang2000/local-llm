@@ -21,7 +21,7 @@ import os
 from langchain_deepseek import ChatDeepSeek
 online_models = ["deepseek-chat","deepseek-reasoner"]
 if not os.getenv("DEEPSEEK_API_KEY"):
-    os.environ["DEEPSEEK_API_KEY"] = "sk-236bce0f7dd24558aeff022508884602"
+    os.environ["DEEPSEEK_API_KEY"] = ""
 # class LangchainOllamaAPI(OllamaAPI):
 class LangchainAPI:
     # BASE_URL = "http://localhost:11434"
